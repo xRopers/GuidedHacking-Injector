@@ -1,0 +1,54 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # The projects use PlatformToolset v145 (Visual Studio 2026).
+    runs-on: windows-2025-vs2026
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, x86]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release|${{ matrix.platform }})
+        shell: pwsh
+        run: >
+          msbuild "GH Injector Library.sln" -m -nologo
+          -p:Configuration=Release -p:Platform=${{ matrix.platform }}
+
+      - name: Check expected binaries exist
+        shell: pwsh
+        run: |
+          $p = "${{ matrix.platform }}"
+          $expected = @(
+            "Release/$p/GH Injector - $p.dll",
+            "Release/$p/GH Injector DNP - $p.dll",
+            "Release/$p/GH Injector SM - $p.exe"
+          )
+          $missing = $expected | Where-Object { -not (Test-Path -LiteralPath $_) }
+          if ($missing) { $missing | ForEach-Object { Write-Error "Missing: $_" }; exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GH-Injector-Library-${{ matrix.platform }}
+          path: |
+            Release/${{ matrix.platform }}/*.dll
+            Release/${{ matrix.platform }}/*.exe
+            Release/${{ matrix.platform }}/*.pdb
+          if-no-files-found: error
